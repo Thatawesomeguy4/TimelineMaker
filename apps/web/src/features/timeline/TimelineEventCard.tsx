@@ -8,23 +8,71 @@ import {
 
 type TimelineEventCardProps = {
   event: TimelineEvent;
+  isDragEnabled: boolean;
+  isDragging: boolean;
+  isDragOver: boolean;
   onEdit: (eventId: string) => void;
   onUpdate: (eventId: string, updates: Partial<TimelineEvent>) => void;
   onDuplicate: (event: TimelineEvent) => void;
   onDelete: (eventId: string) => void;
+  onDragStart: (eventId: string) => void;
+  onDragOver: (eventId: string) => void;
+  onDrop: (targetEventId: string) => void;
+  onDragEnd: () => void;
 };
 
 export function TimelineEventCard({
   event,
+  isDragEnabled,
+  isDragging,
+  isDragOver,
   onEdit,
   onUpdate,
   onDuplicate,
-  onDelete
+  onDelete,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd
 }: TimelineEventCardProps) {
   return (
     <article
+      draggable={isDragEnabled}
       style={getEventCardStyle(event)}
-      className="rounded-2xl border bg-slate-900 p-4 shadow"
+      onDragStart={() => {
+        if (isDragEnabled) {
+          onDragStart(event.id);
+        }
+      }}
+      onDragOver={(dragEvent) => {
+        if (!isDragEnabled) {
+          return;
+        }
+
+        dragEvent.preventDefault();
+        onDragOver(event.id);
+      }}
+      onDrop={(dropEvent) => {
+        if (!isDragEnabled) {
+          return;
+        }
+
+        dropEvent.preventDefault();
+        onDrop(event.id);
+      }}
+      onDragEnd={() => {
+        if (isDragEnabled) {
+          onDragEnd();
+        }
+      }}
+      className={[
+        "rounded-2xl border bg-slate-900 p-4 shadow transition",
+        isDragEnabled ? "cursor-grab active:cursor-grabbing" : "cursor-default",
+        isDragging ? "scale-[0.99] opacity-50" : "",
+        isDragOver && isDragEnabled
+          ? "ring-2 ring-blue-400 ring-offset-2 ring-offset-slate-950"
+          : ""
+      ].join(" ")}
     >
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="flex flex-1 gap-4">
@@ -67,6 +115,7 @@ export function TimelineEventCard({
               onChange={(inputEvent) =>
                 onUpdate(event.id, { title: inputEvent.target.value })
               }
+              onMouseDown={(mouseEvent) => mouseEvent.stopPropagation()}
               className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-lg font-semibold text-slate-100"
             />
 

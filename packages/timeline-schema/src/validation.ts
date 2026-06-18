@@ -37,6 +37,7 @@ export const TimelineEventIconSchema = z.enum([
 
 export const TimelineEventSchema = z.object({
   id: z.string(),
+  order: z.number().optional(),
 
   title: z.string().min(1),
   description: z.string().optional(),

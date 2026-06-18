@@ -22,6 +22,7 @@ export type TimelineEventIcon =
 
 export type TimelineEvent = {
   id: string;
+  order?: number;
 
   title: string;
   description?: string;
