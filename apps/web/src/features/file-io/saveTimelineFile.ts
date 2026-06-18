@@ -5,21 +5,13 @@ export async function saveTimelineFile(
   suggestedName = "timeline.timeline.json"
 ): Promise<void> {
   const json = JSON.stringify(timeline, null, 2);
-  const blob = new Blob([json], { type: "application/json" });
+  const blob = new Blob([json], {
+    type: "application/json"
+  });
 
-  const supportsFileSystemAccess =
-    "showSaveFilePicker" in window &&
-    (() => {
-      try {
-        return window.self === window.top;
-      } catch {
-        return false;
-      }
-    })();
-
-  if (supportsFileSystemAccess) {
-    const pickerWindow = window as unknown as {
-      showSaveFilePicker: (options: {
+  const maybeWindowWithFilePicker = window as Window &
+    typeof globalThis & {
+      showSaveFilePicker?: (options: {
         suggestedName: string;
         types: Array<{
           description: string;
@@ -28,7 +20,8 @@ export async function saveTimelineFile(
       }) => Promise<FileSystemFileHandle>;
     };
 
-    const handle = await pickerWindow.showSaveFilePicker({
+  if (typeof maybeWindowWithFilePicker.showSaveFilePicker === "function") {
+    const handle = await maybeWindowWithFilePicker.showSaveFilePicker({
       suggestedName,
       types: [
         {
@@ -48,6 +41,7 @@ export async function saveTimelineFile(
 
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
+
   link.href = url;
   link.download = suggestedName;
   link.style.display = "none";
@@ -55,7 +49,7 @@ export async function saveTimelineFile(
   document.body.appendChild(link);
   link.click();
 
-  setTimeout(() => {
+  window.setTimeout(() => {
     URL.revokeObjectURL(url);
     link.remove();
   }, 1000);

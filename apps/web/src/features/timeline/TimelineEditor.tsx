@@ -1,8 +1,8 @@
-import { useMemo, useState } from "react";
-import type {
-  TimelineDocument,
-  TimelineEvent
-} from "../../../../../packages/timeline-schema/src/types";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { ChangeEvent } from "react";
+import type { TimelineDocument, TimelineEvent } from "../../../../../packages/timeline-schema/src/types";
+import { openTimelineFile } from "../file-io/openTimelineFile";
+import { saveTimelineFile } from "../file-io/saveTimelineFile";
 import { TimelineEventCard } from "./TimelineEventCard";
 import { TimelineEventEditModal } from "./TimelineEventEditModal";
 import { TimelineHeader } from "./TimelineHeader";
@@ -45,8 +45,28 @@ function getSortedEvents(events: TimelineEvent[], sortMode: TimelineSortMode) {
 function normalizeManualOrder(events: TimelineEvent[]) {
   return getManualSortedEvents(events).map((event, index) => ({
     ...event,
-    order: index
+    order: event.order ?? index
   }));
+}
+
+function normalizeImportedTimeline(timeline: TimelineDocument): TimelineDocument {
+  const now = new Date().toISOString();
+
+  return {
+    ...timeline,
+    events: normalizeManualOrder(timeline.events),
+    updatedAt: timeline.updatedAt || now
+  };
+}
+
+function getSafeTimelineFileName(timeline: TimelineDocument) {
+  const safeTitle = timeline.title
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gi, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return `${safeTitle || "timeline"}.timeline.json`;
 }
 
 function reorderEvents(
@@ -79,6 +99,8 @@ function reorderEvents(
 }
 
 export function TimelineEditor() {
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+
   const [timeline, setTimeline] = useState<TimelineDocument>(() => ({
     ...sampleTimeline,
     events: normalizeManualOrder(sampleTimeline.events)
@@ -87,16 +109,35 @@ export function TimelineEditor() {
   const [sortMode, setSortMode] = useState<TimelineSortMode>("time");
   const [viewMode, setViewMode] = useState<TimelineViewMode>("cards");
 
-  const [editingEventId, setEditingEventId] = useState<string | null>(
-    sampleTimeline.events[0]?.id ?? null
-  );
+  const [editingEventId, setEditingEventId] = useState<string | null>(null);
 
   const [draggedEventId, setDraggedEventId] = useState<string | null>(null);
   const [dragOverEventId, setDragOverEventId] = useState<string | null>(null);
+  const [fileMessage, setFileMessage] = useState<string | null>(null);
+  const [isFileMessageVisible, setIsFileMessageVisible] = useState(false);
 
   const sortedEvents = useMemo(() => {
     return getSortedEvents(timeline.events, sortMode);
   }, [timeline.events, sortMode]);
+
+  useEffect(() => {
+  if (!fileMessage) {
+    return;
+  }
+
+  const fadeTimer = window.setTimeout(() => {
+    setIsFileMessageVisible(false);
+  }, 2500);
+
+  const clearTimer = window.setTimeout(() => {
+    setFileMessage(null);
+  }, 3000);
+
+  return () => {
+    window.clearTimeout(fadeTimer);
+    window.clearTimeout(clearTimer);
+  };
+}, [fileMessage]);
 
   const editingEvent = useMemo(() => {
     if (!editingEventId) {
@@ -125,6 +166,11 @@ export function TimelineEditor() {
       updatedAt: now
     }));
   }
+
+  function showFileMessage(message: string) {
+  setFileMessage(message);
+  setIsFileMessageVisible(true);
+}
 
   function addEvent() {
     const now = new Date().toISOString();
@@ -212,6 +258,54 @@ export function TimelineEditor() {
     }
   }
 
+  async function handleSaveTimeline() {
+    try {
+      await saveTimelineFile(timeline, getSafeTimelineFileName(timeline));
+      showFileMessage("Timeline saved successfully.");
+    } catch (error) {
+      showFileMessage(
+        error instanceof Error
+          ? `Save failed: ${error.message}`
+          : "Save failed."
+      );
+    }
+  }
+
+  function handleImportTimelineClick() {
+    importInputRef.current?.click();
+  }
+
+  async function handleImportTimelineFile(file: File) {
+    try {
+      const importedTimeline = await openTimelineFile(file);
+      const normalizedTimeline = normalizeImportedTimeline(importedTimeline);
+
+      setTimeline(normalizedTimeline);
+      setEditingEventId(null);
+      setDraggedEventId(null);
+      setDragOverEventId(null);
+      showFileMessage(`Imported timeline: ${normalizedTimeline.title}`);
+    } catch (error) {
+      showFileMessage(
+        error instanceof Error
+          ? `Import failed: ${error.message}`
+          : "Import failed. The selected file could not be loaded."
+      );
+    }
+  }
+
+  function handleImportInputChange(
+    changeEvent: ChangeEvent<HTMLInputElement>
+  ) {
+    const file = changeEvent.target.files?.[0];
+
+    if (file) {
+      void handleImportTimelineFile(file);
+    }
+
+    changeEvent.target.value = "";
+  }
+
   function handleSortModeChange(nextSortMode: TimelineSortMode) {
     setDraggedEventId(null);
     setDragOverEventId(null);
@@ -267,7 +361,29 @@ export function TimelineEditor() {
           onSortModeChange={handleSortModeChange}
           onViewModeChange={setViewMode}
           onAddEvent={addEvent}
+          onSaveTimeline={handleSaveTimeline}
+          onImportTimelineClick={handleImportTimelineClick}
         />
+
+        <input
+          ref={importInputRef}
+          type="file"
+          accept=".json,.timeline.json,application/json"
+          onChange={handleImportInputChange}
+          className="hidden"
+        />
+
+        {fileMessage ? (
+            <div
+              className={[
+                "mb-4 rounded-xl border border-slate-800 bg-slate-900 p-3 text-sm text-slate-300",
+                "transition-opacity duration-500",
+                isFileMessageVisible ? "opacity-100" : "opacity-0"
+              ].join(" ")}
+            >
+              {fileMessage}
+            </div>
+          ) : null}
 
         <div className="mb-4 rounded-xl border border-slate-800 bg-slate-900 p-3 text-sm text-slate-300">
           {viewMode === "horizontal" ? (

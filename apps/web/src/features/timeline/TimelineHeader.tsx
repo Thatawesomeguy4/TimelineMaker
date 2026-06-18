@@ -9,6 +9,8 @@ type TimelineHeaderProps = {
   onSortModeChange: (sortMode: TimelineSortMode) => void;
   onViewModeChange: (viewMode: TimelineViewMode) => void;
   onAddEvent: () => void;
+  onSaveTimeline: () => void;
+  onImportTimelineClick: () => void;
 };
 
 export function TimelineHeader({
@@ -17,7 +19,9 @@ export function TimelineHeader({
   viewMode,
   onSortModeChange,
   onViewModeChange,
-  onAddEvent
+  onAddEvent,
+  onSaveTimeline,
+  onImportTimelineClick
 }: TimelineHeaderProps) {
   return (
     <div className="mb-6 flex flex-col gap-4 rounded-2xl border border-slate-800 bg-slate-900 p-5 shadow">
@@ -30,12 +34,31 @@ export function TimelineHeader({
           </p>
         </div>
 
-        <button
-          onClick={onAddEvent}
-          className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white shadow hover:bg-blue-500"
-        >
-          New Event
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={onImportTimelineClick}
+            className="rounded-xl bg-slate-800 px-4 py-2 font-semibold text-slate-100 shadow hover:bg-slate-700"
+          >
+            Import
+          </button>
+
+          <button
+            type="button"
+            onClick={onSaveTimeline}
+            className="rounded-xl bg-green-700 px-4 py-2 font-semibold text-white shadow hover:bg-green-600"
+          >
+            Save
+          </button>
+
+          <button
+            type="button"
+            onClick={onAddEvent}
+            className="rounded-xl bg-blue-600 px-4 py-2 font-semibold text-white shadow hover:bg-blue-500"
+          >
+            New Event
+          </button>
+        </div>
       </div>
 
       <div className="grid gap-3 rounded-xl border border-slate-800 bg-slate-950 p-3 xl:grid-cols-2">
