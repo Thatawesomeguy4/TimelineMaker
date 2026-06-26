@@ -10,17 +10,31 @@ export type CollaborationStatus = "connected" | "disconnected" | "connecting";
 
 export type TimelineMetadataSnapshot = Omit<TimelineDocument, "events">;
 
+export type TimelineEventFieldValue =
+  | string
+  | number
+  | boolean
+  | null
+  | string[]
+  | undefined;
+
+export type TimelineEventMap = Y.Map<TimelineEventFieldValue>;
+
 export function useTimelineCollaboration(collaborationRoomId: string | null) {
   const [status, setStatus] = useState<CollaborationStatus>("disconnected");
 
   const doc = useMemo(() => new Y.Doc(), [collaborationRoomId]);
 
-  const eventsMap = useMemo(() => {
-    return doc.getMap<TimelineEvent>("events");
-  }, [doc]);
-
   const metadataMap = useMemo(() => {
     return doc.getMap<TimelineMetadataSnapshot>("metadata");
+  }, [doc]);
+
+  const eventsMap = useMemo(() => {
+    return doc.getMap<TimelineEventMap>("events");
+  }, [doc]);
+
+  const eventOrderArray = useMemo(() => {
+    return doc.getArray<string>("eventOrder");
   }, [doc]);
 
   useEffect(() => {
@@ -54,7 +68,8 @@ export function useTimelineCollaboration(collaborationRoomId: string | null) {
   return {
     doc,
     status,
+    metadataMap,
     eventsMap,
-    metadataMap
+    eventOrderArray
   };
 }

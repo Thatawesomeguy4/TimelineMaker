@@ -1,16 +1,28 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
-import type { TimelineDocument, TimelineEvent } from "../../../../../packages/timeline-schema/src/types";
+import * as Y from "yjs";
+
+import type {
+  TimelineDocument,
+  TimelineEvent
+} from "../../../../../packages/timeline-schema/src/types";
+
+import { useTimelineCollaboration } from "../collaboration/useTimelineCollaboration";
+import type {
+  TimelineEventMap,
+  TimelineMetadataSnapshot
+} from "../collaboration/useTimelineCollaboration";
+
 import { openTimelineFile } from "../file-io/openTimelineFile";
 import { saveTimelineFile } from "../file-io/saveTimelineFile";
 import { TimelineEventCard } from "./TimelineEventCard";
 import { TimelineEventEditModal } from "./TimelineEventEditModal";
 import { TimelineHeader } from "./TimelineHeader";
 import { TimelineHorizontalView } from "./TimelineHorizontalView";
+import { TimelineStartMenu } from "./TimelineStartMenu";
 import { sampleTimeline } from "./timelineSampleData";
 import type { TimelineSortMode, TimelineViewMode } from "./timelineViewTypes";
-import { TimelineStartMenu } from "./TimelineStartMenu";
-import { useTimelineCollaboration } from "../collaboration/useTimelineCollaboration";
+
 
 function getTimeSortedEvents(events: TimelineEvent[]) {
   return [...events].sort((a, b) => {
@@ -92,31 +104,6 @@ function createBlankTimeline(): TimelineDocument {
   };
 }
 
-type TimelineMetadataSnapshot = Omit<TimelineDocument, "events">;
-
-function getTimelineMetadataSnapshot(
-  timeline: TimelineDocument
-): TimelineMetadataSnapshot {
-  const { events: _events, ...metadata } = timeline;
-  return metadata;
-}
-
-function buildTimelineFromCollaborationState(
-  fallbackTimeline: TimelineDocument,
-  metadata: TimelineMetadataSnapshot | undefined,
-  events: TimelineEvent[]
-): TimelineDocument | null {
-  if (!metadata) {
-    return null;
-  }
-
-  return {
-    ...fallbackTimeline,
-    ...metadata,
-    events: normalizeManualOrder(events)
-  };
-}
-
 function getTimelineJson(timeline: TimelineDocument): string {
   return JSON.stringify(timeline);
 }
@@ -171,30 +158,259 @@ function reorderEvents(
   }));
 }
 
+const LOCAL_COLLABORATION_ORIGIN = "timeline-editor-local-change";
+
+function getTimelineMetadataSnapshot(
+  timeline: TimelineDocument
+): TimelineMetadataSnapshot {
+  return {
+    schemaVersion: timeline.schemaVersion,
+    id: timeline.id,
+    title: timeline.title,
+    description: timeline.description,
+    timezone: timeline.timezone,
+    lanes: timeline.lanes,
+    createdAt: timeline.createdAt,
+    updatedAt: timeline.updatedAt
+  };
+}
+
+function writeEventToYMap(eventMap: TimelineEventMap, event: TimelineEvent) {
+  eventMap.set("id", event.id);
+  eventMap.set("title", event.title);
+  eventMap.set("description", event.description);
+  eventMap.set("start", event.start);
+  eventMap.set("end", event.end ?? null);
+  eventMap.set("order", event.order);
+  eventMap.set("laneId", event.laneId ?? null);
+  eventMap.set("category", event.category);
+  eventMap.set("eventType", event.eventType);
+  eventMap.set("status", event.status);
+  eventMap.set("severity", event.severity);
+  eventMap.set("color", event.color);
+  eventMap.set("icon", event.icon);
+  eventMap.set("displayStyle", event.displayStyle);
+  eventMap.set("tags", event.tags ?? []);
+  eventMap.set("source", event.source);
+  eventMap.set("evidenceUrl", event.evidenceUrl);
+  eventMap.set("confidence", event.confidence);
+  eventMap.set("actor", event.actor);
+  eventMap.set("location", event.location);
+  eventMap.set("createdAt", event.createdAt);
+  eventMap.set("updatedAt", event.updatedAt);
+  eventMap.set("createdBy", event.createdBy);
+  eventMap.set("updatedBy", event.updatedBy);
+}
+
+function patchEventYMap(
+  eventMap: TimelineEventMap,
+  updates: Partial<TimelineEvent>
+) {
+  for (const [key, value] of Object.entries(updates)) {
+    eventMap.set(key, value as string | number | boolean | null | string[] | undefined);
+  }
+}
+
+function readEventFromYMap(eventMap: TimelineEventMap): TimelineEvent | null {
+  const id = eventMap.get("id");
+  const title = eventMap.get("title");
+  const start = eventMap.get("start");
+  const createdAt = eventMap.get("createdAt");
+  const updatedAt = eventMap.get("updatedAt");
+
+  if (
+    typeof id !== "string" ||
+    typeof title !== "string" ||
+    typeof start !== "string" ||
+    typeof createdAt !== "string" ||
+    typeof updatedAt !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    id,
+    title,
+    description:
+      typeof eventMap.get("description") === "string"
+        ? (eventMap.get("description") as string)
+        : "",
+    start,
+    end:
+      typeof eventMap.get("end") === "string"
+        ? (eventMap.get("end") as string)
+        : null,
+    order:
+      typeof eventMap.get("order") === "number"
+        ? (eventMap.get("order") as number)
+        : undefined,
+    laneId:
+      typeof eventMap.get("laneId") === "string"
+        ? (eventMap.get("laneId") as string)
+        : null,
+    category:
+      typeof eventMap.get("category") === "string"
+        ? (eventMap.get("category") as string)
+        : undefined,
+    eventType:
+      typeof eventMap.get("eventType") === "string"
+        ? (eventMap.get("eventType") as string)
+        : undefined,
+    status:
+      typeof eventMap.get("status") === "string"
+        ? (eventMap.get("status") as TimelineEvent["status"])
+        : undefined,
+    severity:
+      typeof eventMap.get("severity") === "string"
+        ? (eventMap.get("severity") as TimelineEvent["severity"])
+        : undefined,
+    color:
+      typeof eventMap.get("color") === "string"
+        ? (eventMap.get("color") as string)
+        : undefined,
+    icon:
+      typeof eventMap.get("icon") === "string"
+        ? (eventMap.get("icon") as TimelineEvent["icon"])
+        : undefined,
+    displayStyle:
+      typeof eventMap.get("displayStyle") === "string"
+        ? (eventMap.get("displayStyle") as TimelineEvent["displayStyle"])
+        : undefined,
+    tags: Array.isArray(eventMap.get("tags"))
+      ? (eventMap.get("tags") as string[])
+      : [],
+    source:
+      typeof eventMap.get("source") === "string"
+        ? (eventMap.get("source") as string)
+        : undefined,
+    evidenceUrl:
+      typeof eventMap.get("evidenceUrl") === "string"
+        ? (eventMap.get("evidenceUrl") as string)
+        : undefined,
+    confidence:
+      typeof eventMap.get("confidence") === "string"
+        ? (eventMap.get("confidence") as TimelineEvent["confidence"])
+        : undefined,
+    actor:
+      typeof eventMap.get("actor") === "string"
+        ? (eventMap.get("actor") as string)
+        : undefined,
+    location:
+      typeof eventMap.get("location") === "string"
+        ? (eventMap.get("location") as string)
+        : undefined,
+    createdAt,
+    updatedAt,
+    createdBy:
+      typeof eventMap.get("createdBy") === "string"
+        ? (eventMap.get("createdBy") as string)
+        : undefined,
+    updatedBy:
+      typeof eventMap.get("updatedBy") === "string"
+        ? (eventMap.get("updatedBy") as string)
+        : undefined
+  };
+}
+
+function buildTimelineFromYjs(
+  fallbackTimeline: TimelineDocument,
+  metadata: TimelineMetadataSnapshot | undefined,
+  eventsMap: Y.Map<TimelineEventMap>,
+  eventOrderArray: Y.Array<string>
+): TimelineDocument | null {
+  if (!metadata) {
+    return null;
+  }
+
+  const eventsById = new Map<string, TimelineEvent>();
+
+  for (const [eventId, eventMap] of eventsMap.entries()) {
+    const event = readEventFromYMap(eventMap);
+
+    if (event) {
+      eventsById.set(eventId, event);
+    }
+  }
+
+  const orderedEvents: TimelineEvent[] = [];
+
+  for (const eventId of eventOrderArray.toArray()) {
+    const event = eventsById.get(eventId);
+
+    if (event) {
+      orderedEvents.push(event);
+      eventsById.delete(eventId);
+    }
+  }
+
+  for (const remainingEvent of eventsById.values()) {
+    orderedEvents.push(remainingEvent);
+  }
+
+  return {
+    ...fallbackTimeline,
+    ...metadata,
+    events: normalizeManualOrder(orderedEvents)
+  };
+}
+
+function seedCollaborationDocument(
+  collaboration: ReturnType<typeof useTimelineCollaboration>,
+  timeline: TimelineDocument
+) {
+  collaboration.doc.transact(() => {
+    collaboration.metadataMap.set(
+      "timeline",
+      getTimelineMetadataSnapshot(timeline)
+    );
+
+    collaboration.eventOrderArray.delete(0, collaboration.eventOrderArray.length);
+    collaboration.eventOrderArray.push(timeline.events.map((event) => event.id));
+
+    for (const event of timeline.events) {
+      let eventMap = collaboration.eventsMap.get(event.id);
+
+      if (!eventMap) {
+        eventMap = new Y.Map();
+        collaboration.eventsMap.set(event.id, eventMap);
+      }
+
+      writeEventToYMap(eventMap, event);
+    }
+  }, LOCAL_COLLABORATION_ORIGIN);
+}
+
 export function TimelineEditor() {
+  // Refs to track the import input and last known timeline states
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const lastRemoteTimelineJsonRef = useRef<string | null>(null);
   const lastPublishedTimelineJsonRef = useRef<string | null>(null);
+  const [lastRemoteChangeMessage, setLastRemoteChangeMessage] = useState<string | null>(null);
 
+  // State for the timeline, sort mode, view mode, and collaboration
   const [timeline, setTimeline] = useState<TimelineDocument>(() => ({
     ...sampleTimeline,
     events: normalizeManualOrder(sampleTimeline.events)
   }));
 
+  // State for sorting mode
   const [sortMode, setSortMode] = useState<TimelineSortMode>("time");
   const [viewMode, setViewMode] = useState<TimelineViewMode>("cards");
 
+  // State for editing an event
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
 
+  // State for event dragging in manual sort mode
   const [draggedEventId, setDraggedEventId] = useState<string | null>(null);
   const [dragOverEventId, setDragOverEventId] = useState<string | null>(null);
+  
+  // State for the file message and its visibility
   const [fileMessage, setFileMessage] = useState<string | null>(null);
   const [isFileMessageVisible, setIsFileMessageVisible] = useState(false);
 
-  
+  // State for collaboration room ID
   const [isStartMenuOpen, setIsStartMenuOpen] = useState(true);
   const [collaborationRoomId, setCollaborationRoomId] = useState<string | null>(null);
-
   const collaboration = useTimelineCollaboration(collaborationRoomId);
 
 
@@ -207,48 +423,108 @@ export function TimelineEditor() {
       return;
     }
 
-    function applyRemoteTimelineState() {
+    function applyRemoteState() {
       const metadata = collaboration.metadataMap.get("timeline");
-      const remoteEvents = Array.from(collaboration.eventsMap.values());
 
       setTimeline((currentTimeline) => {
-        const nextTimeline = buildTimelineFromCollaborationState(
+        const nextTimeline = buildTimelineFromYjs(
           currentTimeline,
           metadata,
-          remoteEvents
+          collaboration.eventsMap,
+          collaboration.eventOrderArray
         );
 
         if (!nextTimeline) {
           return currentTimeline;
         }
 
-        const nextTimelineJson = getTimelineJson(nextTimeline);
-
-        lastRemoteTimelineJsonRef.current = nextTimelineJson;
-
-        if (getTimelineJson(currentTimeline) === nextTimelineJson) {
-          return currentTimeline;
-        }
-
+        setLastRemoteChangeMessage("Remote timeline changes applied.");
         return nextTimeline;
       });
     }
 
-    collaboration.eventsMap.observe(applyRemoteTimelineState);
-    collaboration.metadataMap.observe(applyRemoteTimelineState);
+    const observer = (_events: unknown, transaction: Y.Transaction) => {
+      if (transaction.origin === LOCAL_COLLABORATION_ORIGIN) {
+        return;
+      }
 
-    applyRemoteTimelineState();
+      applyRemoteState();
+    };
+
+    collaboration.eventsMap.observeDeep(observer);
+    collaboration.eventOrderArray.observe(observer);
+    collaboration.metadataMap.observe(observer);
+
+    applyRemoteState();
 
     return () => {
-      collaboration.eventsMap.unobserve(applyRemoteTimelineState);
-      collaboration.metadataMap.unobserve(applyRemoteTimelineState);
+      collaboration.eventsMap.unobserveDeep(observer);
+      collaboration.eventOrderArray.unobserve(observer);
+      collaboration.metadataMap.unobserve(observer);
     };
   }, [
     collaborationRoomId,
     collaboration.eventsMap,
+    collaboration.eventOrderArray,
     collaboration.metadataMap
   ]);
 
+  // Remote to local synchronization effect
+  useEffect(() => {
+    if (!collaborationRoomId) {
+      return;
+    }
+
+    function applyRemoteState() {
+      const metadata = collaboration.metadataMap.get("timeline");
+
+      setTimeline((currentTimeline) => {
+        const nextTimeline = buildTimelineFromYjs(
+          currentTimeline,
+          metadata,
+          collaboration.eventsMap,
+          collaboration.eventOrderArray
+        );
+
+        if (!nextTimeline) {
+          return currentTimeline;
+        }
+
+        setLastRemoteChangeMessage("Remote timeline changes applied.");
+        return nextTimeline;
+      });
+    }
+
+    const observer = (
+      _events: unknown,
+      transaction: Y.Transaction
+    ) => {
+      if (transaction.origin === LOCAL_COLLABORATION_ORIGIN) {
+        return;
+      }
+
+      applyRemoteState();
+    };
+
+    collaboration.eventsMap.observeDeep(observer);
+    collaboration.eventOrderArray.observe(observer);
+    collaboration.metadataMap.observe(observer);
+
+    applyRemoteState();
+
+    return () => {
+      collaboration.eventsMap.unobserveDeep(observer);
+      collaboration.eventOrderArray.unobserve(observer);
+      collaboration.metadataMap.unobserve(observer);
+    };
+  }, [
+  collaborationRoomId,
+  collaboration.eventsMap,
+  collaboration.eventOrderArray,
+  collaboration.metadataMap
+  ]);
+
+  // Seed effect for collaboration document when joining a room
   useEffect(() => {
     if (!collaborationRoomId) {
       return;
@@ -258,40 +534,18 @@ export function TimelineEditor() {
       return;
     }
 
-    const timelineJson = getTimelineJson(timeline);
+    const hasRemoteMetadata = collaboration.metadataMap.has("timeline");
+    const hasRemoteEvents = collaboration.eventsMap.size > 0;
 
-    if (timelineJson === lastRemoteTimelineJsonRef.current) {
+    if (hasRemoteMetadata || hasRemoteEvents) {
       return;
     }
 
-    if (timelineJson === lastPublishedTimelineJsonRef.current) {
-      return;
-    }
-
-    collaboration.doc.transact(() => {
-      const metadata = getTimelineMetadataSnapshot(timeline);
-      collaboration.metadataMap.set("timeline", metadata);
-
-      const currentEventIds = new Set(timeline.events.map((event) => event.id));
-
-      for (const existingEventId of Array.from(collaboration.eventsMap.keys())) {
-        if (!currentEventIds.has(existingEventId)) {
-          collaboration.eventsMap.delete(existingEventId);
-        }
-      }
-
-      for (const event of timeline.events) {
-        collaboration.eventsMap.set(event.id, event);
-      }
-    });
-
-    lastPublishedTimelineJsonRef.current = timelineJson;
+    seedCollaborationDocument(collaboration, timeline);
   }, [
     collaborationRoomId,
     collaboration.status,
-    collaboration.doc,
-    collaboration.eventsMap,
-    collaboration.metadataMap,
+    collaboration,
     timeline
   ]);
 
@@ -327,25 +581,47 @@ export function TimelineEditor() {
   function updateEvent(eventId: string, updates: Partial<TimelineEvent>) {
     const now = new Date().toISOString();
 
+    const updatesWithTimestamp: Partial<TimelineEvent> = {
+      ...updates,
+      updatedAt: now
+    };
+
     setTimeline((currentTimeline) => ({
       ...currentTimeline,
       events: currentTimeline.events.map((event) =>
         event.id === eventId
           ? {
               ...event,
-              ...updates,
-              updatedAt: now
+              ...updatesWithTimestamp
             }
           : event
       ),
       updatedAt: now
     }));
+
+    if (!collaborationRoomId || collaboration.status !== "connected") {
+      return;
+    }
+
+    collaboration.doc.transact(() => {
+      const eventMap = collaboration.eventsMap.get(eventId);
+
+      if (!eventMap) {
+        return;
+      }
+
+      patchEventYMap(eventMap, updatesWithTimestamp);
+      collaboration.metadataMap.set("timeline", {
+        ...getTimelineMetadataSnapshot(timeline),
+        updatedAt: now
+      });
+    }, LOCAL_COLLABORATION_ORIGIN);
   }
 
   function showFileMessage(message: string) {
-  setFileMessage(message);
-  setIsFileMessageVisible(true);
-}
+    setFileMessage(message);
+    setIsFileMessageVisible(true);
+  }
 
   function addEvent() {
     const now = new Date().toISOString();
@@ -360,23 +636,19 @@ export function TimelineEditor() {
       end: null,
       order: nextOrder,
       laneId: timeline.lanes[0]?.id ?? null,
-
       category: "General",
       eventType: "Manual Entry",
       status: "Initial Access",
       severity: "Informational",
-
       color: "#2563eb",
       icon: "Dot",
       displayStyle: "Solid",
-
       tags: [],
       source: "Manual entry",
       evidenceUrl: "",
       confidence: "Medium",
       actor: "",
       location: "",
-
       createdAt: now,
       updatedAt: now
     };
@@ -386,6 +658,20 @@ export function TimelineEditor() {
       events: [...normalizeManualOrder(currentTimeline.events), newEvent],
       updatedAt: now
     }));
+
+    if (collaborationRoomId && collaboration.status === "connected") {
+      collaboration.doc.transact(() => {
+        const eventMap = new Y.Map() as TimelineEventMap;
+        writeEventToYMap(eventMap, newEvent);
+
+        collaboration.eventsMap.set(newEvent.id, eventMap);
+        collaboration.eventOrderArray.push([newEvent.id]);
+        collaboration.metadataMap.set("timeline", {
+          ...getTimelineMetadataSnapshot(timeline),
+          updatedAt: now
+        });
+      }, LOCAL_COLLABORATION_ORIGIN);
+    }
 
     setEditingEventId(newEvent.id);
   }
@@ -428,10 +714,25 @@ export function TimelineEditor() {
       };
     });
 
-    if (editingEventId === eventId) {
-      setEditingEventId(null);
+    if (collaborationRoomId && collaboration.status === "connected") {
+      collaboration.doc.transact(() => {
+        collaboration.eventsMap.delete(eventId);
+
+        const existingOrder = collaboration.eventOrderArray.toArray();
+        const index = existingOrder.indexOf(eventId);
+
+        if (index >= 0) {
+          collaboration.eventOrderArray.delete(index, 1);
+        }
+
+        collaboration.metadataMap.set("timeline", {
+          ...getTimelineMetadataSnapshot(timeline),
+          updatedAt: now
+        });
+      }, LOCAL_COLLABORATION_ORIGIN);
     }
   }
+
 
   async function handleSaveTimeline() {
     try {
@@ -517,11 +818,38 @@ export function TimelineEditor() {
 
     const now = new Date().toISOString();
 
+    const reorderedEvents = reorderEvents(
+      timeline.events,
+      draggedEventId,
+      targetEventId
+    );
+
     setTimeline((currentTimeline) => ({
       ...currentTimeline,
-      events: reorderEvents(currentTimeline.events, draggedEventId, targetEventId),
+      events: reorderedEvents,
       updatedAt: now
     }));
+
+    if (collaborationRoomId && collaboration.status === "connected") {
+      collaboration.doc.transact(() => {
+        collaboration.eventOrderArray.delete(0, collaboration.eventOrderArray.length);
+        collaboration.eventOrderArray.push(reorderedEvents.map((event) => event.id));
+
+        for (const event of reorderedEvents) {
+          const eventMap = collaboration.eventsMap.get(event.id);
+
+          if (eventMap) {
+            eventMap.set("order", event.order);
+            eventMap.set("updatedAt", now);
+          }
+        }
+
+        collaboration.metadataMap.set("timeline", {
+          ...getTimelineMetadataSnapshot(timeline),
+          updatedAt: now
+        });
+      }, LOCAL_COLLABORATION_ORIGIN);
+    }
 
     setDraggedEventId(null);
     setDragOverEventId(null);
@@ -632,6 +960,13 @@ export function TimelineEditor() {
             </div>
           </div>
         ) : null}
+        
+        {lastRemoteChangeMessage ? (
+              <div className="mt-1 text-xs text-purple-200/80">
+                {lastRemoteChangeMessage}
+              </div>
+            ) : null}
+
 
         <div className="mb-4 rounded-xl border border-slate-800 bg-slate-900 p-3 text-sm text-slate-300">
           {viewMode === "horizontal" ? (

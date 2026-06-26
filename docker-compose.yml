@@ -77,7 +77,7 @@ services:
     environment:
       HOST: 0.0.0.0
       PORT: 1234
-    command: sh -c "npm install @y/websocket-server && ./node_modules/.bin/y-websocket"
+    command: sh -c "npx y-websocket"
     depends_on:
       - web
 
