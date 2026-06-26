@@ -9,6 +9,7 @@ import { TimelineHeader } from "./TimelineHeader";
 import { TimelineHorizontalView } from "./TimelineHorizontalView";
 import { sampleTimeline } from "./timelineSampleData";
 import type { TimelineSortMode, TimelineViewMode } from "./timelineViewTypes";
+import { TimelineStartMenu } from "./TimelineStartMenu";
 
 function getTimeSortedEvents(events: TimelineEvent[]) {
   return [...events].sort((a, b) => {
@@ -69,6 +70,48 @@ function getSafeTimelineFileName(timeline: TimelineDocument) {
   return `${safeTitle || "timeline"}.timeline.json`;
 }
 
+function createBlankTimeline(): TimelineDocument {
+  const now = new Date().toISOString();
+
+  return {
+    schemaVersion: "1.0",
+    id: crypto.randomUUID(),
+    title: "Untitled Timeline",
+    description: "New timeline",
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    lanes: [
+      {
+        id: "default-lane",
+        name: "Default"
+      }
+    ],
+    events: [],
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
+function createCollaborationTimeline(collaborationRoomId: string): TimelineDocument {
+  const now = new Date().toISOString();
+
+  return {
+    schemaVersion: "1.0",
+    id: collaborationRoomId,
+    title: `Collaborative Timeline: ${collaborationRoomId}`,
+    description: "Shared collaboration workspace",
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    lanes: [
+      {
+        id: "shared-lane",
+        name: "Shared Events"
+      }
+    ],
+    events: [],
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
 function reorderEvents(
   events: TimelineEvent[],
   draggedEventId: string,
@@ -115,6 +158,11 @@ export function TimelineEditor() {
   const [dragOverEventId, setDragOverEventId] = useState<string | null>(null);
   const [fileMessage, setFileMessage] = useState<string | null>(null);
   const [isFileMessageVisible, setIsFileMessageVisible] = useState(false);
+
+  
+  const [isStartMenuOpen, setIsStartMenuOpen] = useState(true);
+  const [collaborationRoomId, setCollaborationRoomId] = useState<string | null>(null);
+
 
   const sortedEvents = useMemo(() => {
     return getSortedEvents(timeline.events, sortMode);
@@ -284,6 +332,8 @@ export function TimelineEditor() {
       setEditingEventId(null);
       setDraggedEventId(null);
       setDragOverEventId(null);
+      setCollaborationRoomId(null);
+      setIsStartMenuOpen(false);
       showFileMessage(`Imported timeline: ${normalizedTimeline.title}`);
     } catch (error) {
       showFileMessage(
@@ -351,6 +401,54 @@ export function TimelineEditor() {
     setDragOverEventId(null);
   }
 
+  function handleCreateNewTimeline() {
+  const blankTimeline = createBlankTimeline();
+
+  setTimeline(blankTimeline);
+  setEditingEventId(null);
+  setDraggedEventId(null);
+  setDragOverEventId(null);
+  setCollaborationRoomId(null);
+  setIsStartMenuOpen(false);
+  showFileMessage("Created new timeline.");
+  }
+
+  function handleOpenTimelineFromMenu() {
+    importInputRef.current?.click();
+  }
+
+  function handleCollaborateOnTimeline(nextCollaborationRoomId: string) {
+    const collaborativeTimeline = createCollaborationTimeline(nextCollaborationRoomId);
+
+    setTimeline(collaborativeTimeline);
+    setEditingEventId(null);
+    setDraggedEventId(null);
+    setDragOverEventId(null);
+    setCollaborationRoomId(nextCollaborationRoomId);
+    setIsStartMenuOpen(false);
+    showFileMessage(`Joined collaboration room: ${nextCollaborationRoomId}`);
+  }
+
+  if (isStartMenuOpen) {
+    return (
+      <>
+        <input
+          ref={importInputRef}
+          type="file"
+          accept=".json,.timeline.json,application/json"
+          onChange={handleImportInputChange}
+          className="hidden"
+        />
+
+        <TimelineStartMenu
+          onCreateNewTimeline={handleCreateNewTimeline}
+          onOpenTimeline={handleOpenTimelineFromMenu}
+          onCollaborate={handleCollaborateOnTimeline}
+        />
+      </>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100">
       <section className="mx-auto max-w-7xl p-6">
@@ -363,6 +461,7 @@ export function TimelineEditor() {
           onAddEvent={addEvent}
           onSaveTimeline={handleSaveTimeline}
           onImportTimelineClick={handleImportTimelineClick}
+          onOpenStartMenu={() => setIsStartMenuOpen(true)}
         />
 
         <input
