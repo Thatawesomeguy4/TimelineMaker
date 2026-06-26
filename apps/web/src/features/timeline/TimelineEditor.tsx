@@ -10,6 +10,7 @@ import { TimelineHorizontalView } from "./TimelineHorizontalView";
 import { sampleTimeline } from "./timelineSampleData";
 import type { TimelineSortMode, TimelineViewMode } from "./timelineViewTypes";
 import { TimelineStartMenu } from "./TimelineStartMenu";
+import { useTimelineCollaboration } from "../collaboration/useTimelineCollaboration";
 
 function getTimeSortedEvents(events: TimelineEvent[]) {
   return [...events].sort((a, b) => {
@@ -91,6 +92,35 @@ function createBlankTimeline(): TimelineDocument {
   };
 }
 
+type TimelineMetadataSnapshot = Omit<TimelineDocument, "events">;
+
+function getTimelineMetadataSnapshot(
+  timeline: TimelineDocument
+): TimelineMetadataSnapshot {
+  const { events: _events, ...metadata } = timeline;
+  return metadata;
+}
+
+function buildTimelineFromCollaborationState(
+  fallbackTimeline: TimelineDocument,
+  metadata: TimelineMetadataSnapshot | undefined,
+  events: TimelineEvent[]
+): TimelineDocument | null {
+  if (!metadata) {
+    return null;
+  }
+
+  return {
+    ...fallbackTimeline,
+    ...metadata,
+    events: normalizeManualOrder(events)
+  };
+}
+
+function getTimelineJson(timeline: TimelineDocument): string {
+  return JSON.stringify(timeline);
+}
+
 function createCollaborationTimeline(collaborationRoomId: string): TimelineDocument {
   const now = new Date().toISOString();
 
@@ -143,6 +173,8 @@ function reorderEvents(
 
 export function TimelineEditor() {
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const lastRemoteTimelineJsonRef = useRef<string | null>(null);
+  const lastPublishedTimelineJsonRef = useRef<string | null>(null);
 
   const [timeline, setTimeline] = useState<TimelineDocument>(() => ({
     ...sampleTimeline,
@@ -163,10 +195,105 @@ export function TimelineEditor() {
   const [isStartMenuOpen, setIsStartMenuOpen] = useState(true);
   const [collaborationRoomId, setCollaborationRoomId] = useState<string | null>(null);
 
+  const collaboration = useTimelineCollaboration(collaborationRoomId);
+
 
   const sortedEvents = useMemo(() => {
     return getSortedEvents(timeline.events, sortMode);
   }, [timeline.events, sortMode]);
+
+  useEffect(() => {
+    if (!collaborationRoomId) {
+      return;
+    }
+
+    function applyRemoteTimelineState() {
+      const metadata = collaboration.metadataMap.get("timeline");
+      const remoteEvents = Array.from(collaboration.eventsMap.values());
+
+      setTimeline((currentTimeline) => {
+        const nextTimeline = buildTimelineFromCollaborationState(
+          currentTimeline,
+          metadata,
+          remoteEvents
+        );
+
+        if (!nextTimeline) {
+          return currentTimeline;
+        }
+
+        const nextTimelineJson = getTimelineJson(nextTimeline);
+
+        lastRemoteTimelineJsonRef.current = nextTimelineJson;
+
+        if (getTimelineJson(currentTimeline) === nextTimelineJson) {
+          return currentTimeline;
+        }
+
+        return nextTimeline;
+      });
+    }
+
+    collaboration.eventsMap.observe(applyRemoteTimelineState);
+    collaboration.metadataMap.observe(applyRemoteTimelineState);
+
+    applyRemoteTimelineState();
+
+    return () => {
+      collaboration.eventsMap.unobserve(applyRemoteTimelineState);
+      collaboration.metadataMap.unobserve(applyRemoteTimelineState);
+    };
+  }, [
+    collaborationRoomId,
+    collaboration.eventsMap,
+    collaboration.metadataMap
+  ]);
+
+  useEffect(() => {
+    if (!collaborationRoomId) {
+      return;
+    }
+
+    if (collaboration.status !== "connected") {
+      return;
+    }
+
+    const timelineJson = getTimelineJson(timeline);
+
+    if (timelineJson === lastRemoteTimelineJsonRef.current) {
+      return;
+    }
+
+    if (timelineJson === lastPublishedTimelineJsonRef.current) {
+      return;
+    }
+
+    collaboration.doc.transact(() => {
+      const metadata = getTimelineMetadataSnapshot(timeline);
+      collaboration.metadataMap.set("timeline", metadata);
+
+      const currentEventIds = new Set(timeline.events.map((event) => event.id));
+
+      for (const existingEventId of Array.from(collaboration.eventsMap.keys())) {
+        if (!currentEventIds.has(existingEventId)) {
+          collaboration.eventsMap.delete(existingEventId);
+        }
+      }
+
+      for (const event of timeline.events) {
+        collaboration.eventsMap.set(event.id, event);
+      }
+    });
+
+    lastPublishedTimelineJsonRef.current = timelineJson;
+  }, [
+    collaborationRoomId,
+    collaboration.status,
+    collaboration.doc,
+    collaboration.eventsMap,
+    collaboration.metadataMap,
+    timeline
+  ]);
 
   useEffect(() => {
   if (!fileMessage) {
@@ -333,6 +460,10 @@ export function TimelineEditor() {
       setDraggedEventId(null);
       setDragOverEventId(null);
       setCollaborationRoomId(null);
+
+      lastRemoteTimelineJsonRef.current = null;
+      lastPublishedTimelineJsonRef.current = null;
+
       setIsStartMenuOpen(false);
       showFileMessage(`Imported timeline: ${normalizedTimeline.title}`);
     } catch (error) {
@@ -404,6 +535,9 @@ export function TimelineEditor() {
   function handleCreateNewTimeline() {
   const blankTimeline = createBlankTimeline();
 
+  lastRemoteTimelineJsonRef.current = null;
+  lastPublishedTimelineJsonRef.current = null;
+
   setTimeline(blankTimeline);
   setEditingEventId(null);
   setDraggedEventId(null);
@@ -419,6 +553,9 @@ export function TimelineEditor() {
 
   function handleCollaborateOnTimeline(nextCollaborationRoomId: string) {
     const collaborativeTimeline = createCollaborationTimeline(nextCollaborationRoomId);
+
+    lastRemoteTimelineJsonRef.current = null;
+    lastPublishedTimelineJsonRef.current = null;
 
     setTimeline(collaborativeTimeline);
     setEditingEventId(null);
@@ -483,6 +620,18 @@ export function TimelineEditor() {
               {fileMessage}
             </div>
           ) : null}
+
+        {collaborationRoomId ? (
+          <div className="mb-4 rounded-xl border border-purple-800 bg-purple-950 p-3 text-sm text-purple-100">
+            <div>
+              Collaboration room:{" "}
+              <strong className="text-white">{collaborationRoomId}</strong>
+            </div>
+            <div className="mt-1 text-xs text-purple-200/80">
+              Status: <strong>{collaboration.status}</strong>
+            </div>
+          </div>
+        ) : null}
 
         <div className="mb-4 rounded-xl border border-slate-800 bg-slate-900 p-3 text-sm text-slate-300">
           {viewMode === "horizontal" ? (

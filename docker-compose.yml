@@ -74,7 +74,10 @@ services:
       - web_node_modules:/workspace/apps/web/node_modules
     ports:
       - "1234:1234"
-    command: sh -c "npm install @y/y-websocket-server && HOST=0.0.0.0 PORT=1234 npx y-websocket"
+    environment:
+      HOST: 0.0.0.0
+      PORT: 1234
+    command: sh -c "npm install @y/websocket-server && ./node_modules/.bin/y-websocket"
     depends_on:
       - web
 

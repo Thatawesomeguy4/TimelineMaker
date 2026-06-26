@@ -1,18 +1,37 @@
 import { useEffect, useMemo, useState } from "react";
 import * as Y from "yjs";
 import { WebsocketProvider } from "y-websocket";
+import type {
+  TimelineDocument,
+  TimelineEvent
+} from "../../../../../packages/timeline-schema/src/types";
 
-type CollaborationStatus = "connected" | "disconnected" | "connecting";
+export type CollaborationStatus = "connected" | "disconnected" | "connecting";
 
-export function useTimelineCollaboration(timelineId: string) {
+export type TimelineMetadataSnapshot = Omit<TimelineDocument, "events">;
+
+export function useTimelineCollaboration(collaborationRoomId: string | null) {
   const [status, setStatus] = useState<CollaborationStatus>("disconnected");
 
-  const doc = useMemo(() => new Y.Doc(), [timelineId]);
+  const doc = useMemo(() => new Y.Doc(), [collaborationRoomId]);
+
+  const eventsMap = useMemo(() => {
+    return doc.getMap<TimelineEvent>("events");
+  }, [doc]);
+
+  const metadataMap = useMemo(() => {
+    return doc.getMap<TimelineMetadataSnapshot>("metadata");
+  }, [doc]);
 
   useEffect(() => {
+    if (!collaborationRoomId) {
+      setStatus("disconnected");
+      return;
+    }
+
     const provider = new WebsocketProvider(
       import.meta.env.VITE_COLLAB_WS_URL ?? "ws://localhost:1234",
-      `timeline-${timelineId}`,
+      `timeline-${collaborationRoomId}`,
       doc
     );
 
@@ -28,13 +47,14 @@ export function useTimelineCollaboration(timelineId: string) {
     return () => {
       provider.destroy();
       doc.destroy();
+      setStatus("disconnected");
     };
-  }, [doc, timelineId]);
+  }, [collaborationRoomId, doc]);
 
   return {
     doc,
     status,
-    events: doc.getMap("events"),
-    metadata: doc.getMap("metadata")
+    eventsMap,
+    metadataMap
   };
 }
